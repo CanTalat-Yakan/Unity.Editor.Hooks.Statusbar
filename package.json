@@ -1,0 +1,21 @@
+{
+  "name": "com.unityessentials.editor.hooks.statusbar",
+  "version": "1.0.1",
+  "displayName": "Editor Hooks Statusbar",
+  "description": "This is a part of the UnityEssentials Ecosystem",
+  "unity": "6000.0",
+  "unityRelease": "",
+  "resolutionStrategy": "highestPatch",
+  "dependencies": {},
+  "keywords": [],
+  "author": {
+    "name": "Unity Essentials",
+    "email": "",
+    "url": ""
+  },
+  "documentationUrl": "",
+  "changelogUrl": "",
+  "licensesUrl": "",
+  "samples": [],
+  "hideInEditor": true
+}
