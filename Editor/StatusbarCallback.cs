@@ -38,7 +38,7 @@ namespace UnityEssentials
         {
             setupAttempts++;
 
-            if (!TryFindAppStatusBarRoot(out VisualElement root))
+            if (!TryFindAppStatusBarRoot(out VisualElement root, out UnityEngine.Object statusBarView))
             {
                 TryAbort("Could not find AppStatusBar root.");
                 return;
@@ -57,6 +57,12 @@ namespace UnityEssentials
                 nativeStatusBarContent = FindNativeStatusBarContent(root);
                 leftDockRoot = overlayRoot?.Q(LeftDockName);
                 rightDockRoot = overlayRoot?.Q(RightDockName);
+                StatusbarFocusController.Configure(
+                    statusBarView,
+                    leftDockRoot,
+                    rightDockRoot,
+                    leftDockRoot?.Q<IMGUIContainer>(),
+                    rightDockRoot?.Q<IMGUIContainer>());
                 EditorApplication.update -= UpdateStatusBarOffsets;
                 EditorApplication.update += UpdateStatusBarOffsets;
                 EditorApplication.update -= Initialize;
@@ -77,9 +83,13 @@ namespace UnityEssentials
             VisualElement centerDock = CreateDock(Justify.Center, true);
             VisualElement rightDock = CreateDock(RightDockName, Justify.FlexEnd, false);
 
-            leftDock.Add(new IMGUIContainer(() => OnStatusbarGUILeft?.Invoke()));
-            centerDock.Add(new IMGUIContainer(() => OnStatusbarGUI?.Invoke()));
-            rightDock.Add(new IMGUIContainer(() => OnStatusbarGUIRight?.Invoke()));
+            var leftContainer = new IMGUIContainer(() => OnStatusbarGUILeft?.Invoke());
+            var centerContainer = new IMGUIContainer(() => OnStatusbarGUI?.Invoke());
+            var rightContainer = new IMGUIContainer(() => OnStatusbarGUIRight?.Invoke());
+
+            leftDock.Add(leftContainer);
+            centerDock.Add(centerContainer);
+            rightDock.Add(rightContainer);
 
             overlay.Add(leftDock);
             overlay.Add(centerDock);
@@ -93,6 +103,7 @@ namespace UnityEssentials
             nativeStatusBarContent = FindNativeStatusBarContent(root);
             leftDockRoot = leftDock;
             rightDockRoot = rightDock;
+            StatusbarFocusController.Configure(statusBarView, leftDockRoot, rightDockRoot, leftContainer, rightContainer);
             EditorApplication.update -= UpdateStatusBarOffsets;
             EditorApplication.update += UpdateStatusBarOffsets;
 
@@ -136,6 +147,8 @@ namespace UnityEssentials
 
             if (rightDockRoot == null)
                 rightDockRoot = overlayRoot.Q(RightDockName);
+
+            StatusbarFocusController.UpdateDockRoots(leftDockRoot, rightDockRoot);
 
             if (nativeStatusBarContent == null)
                 return;
@@ -192,9 +205,10 @@ namespace UnityEssentials
             return null;
         }
 
-        private static bool TryFindAppStatusBarRoot(out VisualElement root)
+        private static bool TryFindAppStatusBarRoot(out VisualElement root, out UnityEngine.Object statusBarView)
         {
             root = null;
+            statusBarView = null;
 
             Assembly editorAssembly = typeof(Editor).Assembly;
             Type guiViewType = editorAssembly.GetType("UnityEditor.GUIView");
@@ -240,7 +254,10 @@ namespace UnityEssentials
                 }
 
                 if (root != null)
+                {
+                    statusBarView = guiView;
                     return true;
+                }
             }
 
             return false;
