@@ -1,7 +1,6 @@
 #if UNITY_EDITOR
 using System.Reflection;
 using UnityEditor;
-using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace UnityEssentials
@@ -13,9 +12,11 @@ namespace UnityEssentials
         private static VisualElement s_rightDockRoot;
         private static IMGUIContainer s_leftDockContainer;
         private static IMGUIContainer s_rightDockContainer;
-        private static bool s_isMonitoringFocusLoss;
-        private static bool s_wasStatusBarFocused;
-        private static bool s_hasObservedStatusBarFocus;
+        private static bool s_isRepainting;
+
+        private static MethodInfo s_focusMethod;
+        private static MethodInfo s_grabKeyboardFocusMethod;
+        private static MethodInfo s_repaintMethod;
 
         public static void Configure(
             UnityEngine.Object appStatusBarView,
@@ -29,6 +30,7 @@ namespace UnityEssentials
             s_rightDockRoot = rightDockRoot;
             s_leftDockContainer = leftDockContainer;
             s_rightDockContainer = rightDockContainer;
+            CacheReflection(appStatusBarView);
         }
 
         public static void UpdateDockRoots(VisualElement leftDockRoot, VisualElement rightDockRoot)
@@ -43,7 +45,7 @@ namespace UnityEssentials
         public static void FocusRightDockContainer()
         {
             FocusStatusBarView();
-            StartFocusLossMonitoring();
+            StartContinuousRepaint();
 
             if (TryGetRightDockContainer(out var container))
             {
@@ -56,7 +58,7 @@ namespace UnityEssentials
         public static void FocusLeftDockContainer()
         {
             FocusStatusBarView();
-            StartFocusLossMonitoring();
+            StartContinuousRepaint();
 
             if (TryGetLeftDockContainer(out var container))
             {
@@ -66,87 +68,18 @@ namespace UnityEssentials
             }
         }
 
-
-        public static void DefocusDockContainers()
+        private static void StartContinuousRepaint()
         {
-            if (TryGetRightDockContainer(out var rightContainer))
-                ScheduleContainerVisualDefocus(rightContainer);
-                
-            if (TryGetLeftDockContainer(out var leftContainer))
-                ScheduleContainerVisualDefocus(leftContainer);
+            if (s_isRepainting)
+                return;
 
-            StopFocusLossMonitoring();
+            s_isRepainting = true;
+            EditorApplication.update += ContinuousRepaint;
         }
 
-        private static void StartFocusLossMonitoring()
+        private static void ContinuousRepaint()
         {
-            if (s_isMonitoringFocusLoss)
-                return;
-
-            s_wasStatusBarFocused = IsStatusBarViewFocused();
-            s_hasObservedStatusBarFocus = s_wasStatusBarFocused;
-            s_isMonitoringFocusLoss = true;
-            EditorApplication.update += MonitorStatusBarFocusLoss;
-        }
-
-        private static void StopFocusLossMonitoring()
-        {
-            if (!s_isMonitoringFocusLoss)
-                return;
-
-            s_isMonitoringFocusLoss = false;
-            s_hasObservedStatusBarFocus = false;
-            EditorApplication.update -= MonitorStatusBarFocusLoss;
-        }
-
-        private static void MonitorStatusBarFocusLoss()
-        {
-            if (!s_isMonitoringFocusLoss)
-                return;
-
-            var isFocused = IsStatusBarViewFocused();
-
-            // Ignore early transient states until status bar focus has been observed at least once
-            // during this monitoring window. This avoids first-use false positives after domain reload.
-            if (!s_hasObservedStatusBarFocus)
-            {
-                s_wasStatusBarFocused = isFocused;
-                if (isFocused)
-                    s_hasObservedStatusBarFocus = true;
-                return;
-            }
-
-            if (s_wasStatusBarFocused && !isFocused)
-            {
-                DefocusDockContainers();
-                return;
-            }
-
-            s_wasStatusBarFocused = isFocused;
-        }
-
-        private static bool IsStatusBarViewFocused()
-        {
-            if (s_appStatusBarView == null)
-                return false;
-
-            var type = s_appStatusBarView.GetType();
-
-            var hasFocusMethod = type.GetMethod("HasFocus", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (hasFocusMethod != null)
-            {
-                try
-                {
-                    var value = hasFocusMethod.Invoke(s_appStatusBarView, null);
-                    if (value is bool focused)
-                        return focused;
-                }
-                catch
-                {
-                }
-            }
-
-            return GUIUtility.keyboardControl > 0;
+            RepaintStatusBarView();
         }
 
         private static bool TryGetRightDockContainer(out IMGUIContainer container)
@@ -167,17 +100,25 @@ namespace UnityEssentials
             return container != null;
         }
 
+        private static void CacheReflection(UnityEngine.Object view)
+        {
+            if (view == null)
+                return;
+
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var type = view.GetType();
+            s_focusMethod = type.GetMethod("Focus", flags);
+            s_grabKeyboardFocusMethod = type.GetMethod("GrabKeyboardFocus", flags);
+            s_repaintMethod = type.GetMethod("Repaint", flags);
+        }
+
         private static void FocusStatusBarView()
         {
             if (s_appStatusBarView == null)
                 return;
 
-            var type = s_appStatusBarView.GetType();
-            var focusMethod = type.GetMethod("Focus", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            focusMethod?.Invoke(s_appStatusBarView, null);
-
-            var grabKeyboardFocusMethod = type.GetMethod("GrabKeyboardFocus", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            grabKeyboardFocusMethod?.Invoke(s_appStatusBarView, null);
+            s_focusMethod?.Invoke(s_appStatusBarView, null);
+            s_grabKeyboardFocusMethod?.Invoke(s_appStatusBarView, null);
         }
 
         private static void RepaintStatusBarView()
@@ -185,25 +126,8 @@ namespace UnityEssentials
             if (s_appStatusBarView == null)
                 return;
 
-            var type = s_appStatusBarView.GetType();
-            var repaintMethod = type.GetMethod("Repaint", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            repaintMethod?.Invoke(s_appStatusBarView, null);
+            s_repaintMethod?.Invoke(s_appStatusBarView, null);
         }
-        
-        private static void ScheduleContainerVisualDefocus(IMGUIContainer container)
-        {
-            EditorApplication.delayCall += () =>
-            {
-                if (container == null)
-                    return;
-
-                container.Blur();
-                container.focusable = false;
-                container.MarkDirtyRepaint();
-                RepaintStatusBarView();
-            };
-        }
-
     }
 }
 #endif
